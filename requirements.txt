@@ -1,10 +1,9 @@
-mediapipe
-torch
-torchvision
-opencv-python-headless
-numpy
-uvicorn
+--extra-index-url https://download.pytorch.org/whl/cpu
 fastapi
+uvicorn
 python-multipart
-requests
-Pillow
+opencv-python-headless
+torch
+numpy
+mediapipe
+moviepy
