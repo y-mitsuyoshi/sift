@@ -4,6 +4,8 @@ uvicorn
 python-multipart
 opencv-python-headless
 torch
+torchvision
 numpy
 mediapipe
-moviepy
+requests
+Pillow
