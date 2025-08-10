@@ -6,3 +6,5 @@ numpy
 uvicorn
 fastapi
 python-multipart
+requests
+Pillow

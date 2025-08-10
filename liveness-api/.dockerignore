@@ -1,0 +1,17 @@
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.git
+.gitignore
+README.md
+.pytest_cache
+.coverage
+.nyc_output
+node_modules
+*.md
+test_*.py
+download_model.py
+*.mp4
+*.mov
+*.avi
