@@ -19,5 +19,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY ./app ./app
 EXPOSE 8000
 
-# Python直接実行でuvicornを起動
-CMD ["python", "-c", "import uvicorn; uvicorn.run('app.main:app', host='0.0.0.0', port=8000)"]
+# uvicornを直接実行し、Pythonパスを設定
+ENV PYTHONPATH=/app
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
