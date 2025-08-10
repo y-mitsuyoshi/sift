@@ -92,6 +92,17 @@ def validate_video_file(file: UploadFile) -> None:
     # ファイルサイズチェック（10MB）
     max_size = 10 * 1024 * 1024  # 10MB
     
+    # ファイルの内容を読み取らずにサイズを取得
+    file.file.seek(0, 2)
+    file_size = file.file.tell()
+    file.file.seek(0)
+
+    if file_size > max_size:
+        raise HTTPException(
+            status_code=413,  # Payload Too Large
+            detail=f"File size ({file_size / 1024 / 1024:.2f}MB) exceeds the limit of {max_size / 1024 / 1024}MB."
+        )
+
     # Content-Typeチェック
     allowed_types = ["video/mp4", "video/mpeg", "video/quicktime"]
     if file.content_type not in allowed_types:
