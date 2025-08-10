@@ -109,11 +109,11 @@ class FallbackPassiveChecker:
                 scores.append(0.5)  # デフォルトスコア
         
         average_score = sum(scores) / len(scores) if scores else 0.5
-        passed = average_score >= self.threshold
+        passed = bool(average_score >= self.threshold)
         
         return {
             "passed": passed,
-            "average_real_score": round(average_score, 3),
+            "average_real_score": round(float(average_score), 3),
             "message": "Fallback passive check (basic image quality analysis)"
         }
 
