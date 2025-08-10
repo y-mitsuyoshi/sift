@@ -40,50 +40,20 @@ async def startup_event():
     global passive_checker, active_checker
     
     # モデルパス
-    model_path = "/app/app/models/2.7_80x80_MiniFASNetV2.pth"
+    model_path = "app/models/2.7_80x80_MiniFASNetV2.pth"
     
     try:
-        # パッシブチェッカー初期化
-        if os.path.exists(model_path):
-            passive_checker = PassiveChecker(model_path, threshold=0.8)
-            logger.info("Passive checker initialized successfully")
-        else:
-            logger.warning(f"Model file not found: {model_path}")
-            logger.warning("Passive checker will use mock implementation")
-            passive_checker = MockPassiveChecker()
+        # チェッカーの初期化
+        passive_checker = PassiveChecker(model_path, threshold=0.8)
+        logger.info("Passive checker initialized successfully")
         
-        # アクティブチェッカー初期化
         active_checker = ActiveChecker()
         logger.info("Active checker initialized successfully")
         
     except Exception as e:
-        logger.error(f"Error during startup: {e}")
-        # フォールバック用のモックチェッカーを使用
-        passive_checker = MockPassiveChecker()
-        active_checker = MockActiveChecker()
-
-class MockPassiveChecker:
-    """
-    モデルファイルがない場合のモック実装
-    """
-    def check(self, frames):
-        logger.warning("Using mock passive checker - model file not available")
-        return {
-            "passed": True,
-            "average_real_score": 0.95,
-            "message": "Mock passive check (model not available)"
-        }
-
-class MockActiveChecker:
-    """
-    MediaPipeが利用できない場合のモック実装
-    """
-    def check(self, frames):
-        logger.warning("Using mock active checker - MediaPipe not available")
-        return {
-            "passed": True,
-            "message": "Mock active check (MediaPipe not available)"
-        }
+        logger.error(f"Error during checker initialization: {e}", exc_info=True)
+        # 初期化に失敗した場合は、アプリケーションをクラッシュさせる
+        raise RuntimeError(f"Failed to initialize checkers: {e}")
 
 def validate_video_file(file: UploadFile) -> None:
     """
