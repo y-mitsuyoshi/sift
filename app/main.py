@@ -89,9 +89,9 @@ def validate_video_file(file: UploadFile) -> None:
     """
     動画ファイルの検証
     """
-    # ファイルサイズチェック（10MB）
-    max_size = 10 * 1024 * 1024  # 10MB
-    
+    # ファイルサイズチェック（100MB）
+    max_size = 100 * 1024 * 1024  # 100MB
+
     # ファイルの内容を読み取らずにサイズを取得
     file.file.seek(0, 2)
     file_size = file.file.tell()
@@ -163,11 +163,11 @@ async def liveness_check(file: UploadFile = File(...)) -> Dict[str, Any]:
         video_info = get_video_info(temp_file_path)
         logger.info(f"Video info: {video_info}")
         
-        # 5秒制限チェック
-        if video_info["duration"] > 5.0:
+        # 10秒制限チェック
+        if video_info["duration"] > 10.0:
             raise HTTPException(
                 status_code=400,
-                detail=f"Video duration ({video_info['duration']:.2f}s) exceeds 5 second limit"
+                detail=f"Video duration ({video_info['duration']:.2f}s) exceeds 10 second limit"
             )
         
         # フレーム抽出
