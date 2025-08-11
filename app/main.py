@@ -7,7 +7,15 @@ import cv2
 from typing import Dict, Any
 
 from .video_processor import save_uploaded_file, extract_frames, cleanup_temp_file, get_video_info
-from .passive_checker import PassiveChecker
+
+# 条件付きインポート - オプションのモジュール
+try:
+    from .passive_checker import PassiveChecker
+    PASSIVE_CHECKER_AVAILABLE = True
+except ImportError as e:
+    PASSIVE_CHECKER_AVAILABLE = False
+    logging.warning(f"PassiveChecker not available: {e}")
+
 from .active_checker import ActiveChecker
 
 # ログ設定
@@ -40,39 +48,41 @@ async def startup_event():
     """
     global passive_checker, active_checker
     
-    # 複数のモデルパスを試行
-    possible_paths = [
-        "/app/app/models/2.7_80x80_MiniFASNetV2.pth",  # Dockerコンテナ内
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "models", "2.7_80x80_MiniFASNetV2.pth"),  # 相対パス
-        "app/models/2.7_80x80_MiniFASNetV2.pth"  # ワーキングディレクトリから
-    ]
-    
-    model_path = None
-    for path in possible_paths:
-        if os.path.exists(path):
-            model_path = path
-            logger.info(f"Found model file at: {path}")
-            break
-    
     try:
         # アクティブチェッカー初期化（MediaPipe）
         active_checker = ActiveChecker()
         logger.info("Active checker initialized successfully")
         
-        # パッシブチェッカー初期化（深層学習モデル）
-        if model_path:
-            try:
-                passive_checker = PassiveChecker(model_path, threshold=0.5)  # 閾値を下げる
-                logger.info(f"Passive checker initialized successfully with model: {model_path}")
-            except Exception as model_error:
-                logger.error(f"Failed to load model from {model_path}: {model_error}")
+        # パッシブチェッカー初期化
+        if PASSIVE_CHECKER_AVAILABLE:
+            # 複数のモデルパスを試行
+            possible_paths = [
+                "/app/app/models/2.7_80x80_MiniFASNetV2.pth",  # Dockerコンテナ内
+                os.path.join(os.path.dirname(os.path.abspath(__file__)), "models", "2.7_80x80_MiniFASNetV2.pth"),  # 相対パス
+                "app/models/2.7_80x80_MiniFASNetV2.pth"  # ワーキングディレクトリから
+            ]
+            
+            model_path = None
+            for path in possible_paths:
+                if os.path.exists(path):
+                    model_path = path
+                    logger.info(f"Found model file at: {path}")
+                    break
+            
+            if model_path:
+                try:
+                    passive_checker = PassiveChecker(model_path, threshold=0.5)
+                    logger.info(f"Passive checker initialized successfully with model: {model_path}")
+                except Exception as model_error:
+                    logger.error(f"Failed to load model from {model_path}: {model_error}")
+                    logger.info("Using improved fallback passive checker")
+                    passive_checker = ImprovedFallbackPassiveChecker()
+            else:
+                logger.warning("Model file not found in any of the expected locations")
                 logger.info("Using improved fallback passive checker")
                 passive_checker = ImprovedFallbackPassiveChecker()
         else:
-            logger.warning("Model file not found in any of the expected locations:")
-            for path in possible_paths:
-                logger.warning(f"  - {path}")
-            logger.info("Using improved fallback passive checker")
+            logger.info("PassiveChecker module not available. Using fallback passive checker")
             passive_checker = ImprovedFallbackPassiveChecker()
         
     except Exception as e:
@@ -135,7 +145,7 @@ class FallbackPassiveChecker:
 class ImprovedFallbackPassiveChecker:
     """
     改良されたフォールバック実装
-    顔検出と画像品質を組み合わせた判定
+    顔検出と画像品質を組み合わせた判定 + 新しい検知器
     """
     def __init__(self):
         self.threshold = 0.3  # より寛容な閾値
@@ -148,14 +158,32 @@ class ImprovedFallbackPassiveChecker:
             self.has_face_detector = False
             logger.warning("Face cascade not available, using basic image analysis only")
         
+        # 新しい検知器をインポート・初期化
+        try:
+            if PASSIVE_CHECKER_AVAILABLE:
+                from .passive_checker import TextureNoiseDetector, FaceIdentityDetector, VirtualCameraDetector
+                self.texture_detector = TextureNoiseDetector()
+                self.identity_detector = FaceIdentityDetector()
+                self.virtual_camera_detector = VirtualCameraDetector()
+                self.enhanced_available = True
+                logger.info("Enhanced detectors initialized successfully")
+            else:
+                self.enhanced_available = False
+                logger.info("Enhanced detectors not available (passive_checker module not loaded)")
+        except ImportError as e:
+            logger.warning(f"Enhanced detectors not available: {e}")
+            self.enhanced_available = False
+        
     def check(self, frames):
         if not frames:
             return {
                 "passed": False,
                 "average_real_score": 0.0,
-                "message": "No frames to analyze"
+                "message": "No frames to analyze",
+                "enhanced_analysis": None
             }
         
+        # 基本的な画像品質分析
         scores = []
         face_detection_count = 0
         
@@ -206,24 +234,74 @@ class ImprovedFallbackPassiveChecker:
             return {
                 "passed": False,
                 "average_real_score": 0.0,
-                "message": "Failed to process any frames"
+                "message": "Failed to process any frames",
+                "enhanced_analysis": None
             }
         
-        average_score = sum(scores) / len(scores)
+        base_average_score = sum(scores) / len(scores)
         face_detection_rate = face_detection_count / len(frames[:15]) if self.has_face_detector else 0
         
         # 顔検出率も考慮
         if face_detection_rate > 0.3:  # 30%以上のフレームで顔検出
-            average_score += 0.2  # ボーナス
+            base_average_score += 0.2  # ボーナス
         
-        average_score = min(average_score, 1.0)
-        passed = bool(average_score >= self.threshold)
+        base_average_score = min(base_average_score, 1.0)
+        
+        # 強化された検知器を実行（利用可能な場合）
+        enhanced_analysis = None
+        final_score = base_average_score
+        
+        if self.enhanced_available:
+            try:
+                logger.info("Running enhanced fallback analysis...")
+                
+                # 各検知器を実行
+                texture_result = self.texture_detector.compute_texture_score(frames)
+                identity_result = self.identity_detector.analyze_face_consistency(frames)
+                virtual_camera_result = self.virtual_camera_detector.detect_virtual_camera()
+                
+                # 強化分析の結果を統合
+                enhanced_weights = {
+                    'base': 0.5,
+                    'texture': 0.2,
+                    'identity': 0.2,
+                    'virtual_camera': 0.1
+                }
+                
+                enhanced_scores = {
+                    'base': base_average_score,
+                    'texture': texture_result['average_score'],
+                    'identity': identity_result['consistency_score'],
+                    'virtual_camera': 1.0 - virtual_camera_result['risk_score']
+                }
+                
+                # 加重平均で最終スコア計算
+                final_score = sum(
+                    enhanced_scores[key] * enhanced_weights[key] 
+                    for key in enhanced_weights.keys()
+                )
+                
+                enhanced_analysis = {
+                    "texture_analysis": texture_result,
+                    "identity_analysis": identity_result,
+                    "virtual_camera_analysis": virtual_camera_result,
+                    "enhanced_scores": {k: round(v, 3) for k, v in enhanced_scores.items()},
+                    "weights_used": enhanced_weights
+                }
+                
+            except Exception as e:
+                logger.warning(f"Enhanced analysis failed, falling back to basic analysis: {e}")
+                final_score = base_average_score
+        
+        passed = bool(final_score >= self.threshold)
         
         return {
             "passed": passed,
-            "average_real_score": round(float(average_score), 3),
+            "average_real_score": round(float(final_score), 3),
+            "base_score": round(float(base_average_score), 3),
             "face_detection_rate": round(face_detection_rate, 3),
-            "message": f"Improved fallback check (face detection: {face_detection_rate:.1%})"
+            "message": f"{'Enhanced' if enhanced_analysis else 'Basic'} fallback check ({'passed' if passed else 'failed'})",
+            "enhanced_analysis": enhanced_analysis
         }
 
 def validate_video_file(file: UploadFile) -> None:
