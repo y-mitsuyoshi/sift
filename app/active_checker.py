@@ -24,21 +24,21 @@ class ActiveChecker:
         # 状態管理
         self.reset_state()
         
-        # まばたき検出用のランドマークインデックス
-        # 左目: [362, 385, 387, 263, 373, 380]
-        # 右目: [33, 160, 158, 133, 153, 144]
+        # まばたき検出用のランドマークインデックス（MediaPipe Face Mesh 468標準）
+        # 左目（人から見て左側）: [362, 385, 387, 263, 373, 380]
+        # 右目（人から見て右側）: [33, 160, 158, 133, 153, 144]
         self.left_eye_indices = [362, 385, 387, 263, 373, 380]
         self.right_eye_indices = [33, 160, 158, 133, 153, 144]
         
         # 顔の向き検出用のランドマークインデックス
-        # 鼻先、左右の顔輪郭点
+        # 目の外側のポイント（頭部の傾き検出用）
         self.nose_tip_index = 1
         self.left_face_index = 234
         self.right_face_index = 454
         
         # しきい値設定
-        self.blink_threshold = 0.25  # まばたき判定のEAR閾値
-        self.head_turn_threshold = 0.15  # 顔の向き判定の閾値
+        self.blink_threshold = 0.18  # まばたき判定のEAR閾値（より寛容に）
+        self.head_turn_threshold = 0.10  # 頭部の傾き判定の閾値（度数換算で1.0度）
 
     def reset_state(self):
         """
@@ -54,31 +54,28 @@ class ActiveChecker:
 
     def _calculate_ear(self, eye_landmarks: List[Tuple[float, float]]) -> float:
         """
-        Eye Aspect Ratio (EAR) を計算
+        Eye Aspect Ratio (EAR) を計算（簡略版）
         まばたき検出に使用
         
         Args:
-            eye_landmarks: 目のランドマーク座標
+            eye_landmarks: 目のランドマーク座標（6点）
             
         Returns:
             EAR値
         """
-        if len(eye_landmarks) < 6:
-            return 0.0
+        if len(eye_landmarks) != 6:
+            return 0.3  # デフォルト値（目が開いている状態）
         
-        # 垂直距離
-        vertical_1 = math.sqrt((eye_landmarks[1][0] - eye_landmarks[5][0])**2 + 
-                              (eye_landmarks[1][1] - eye_landmarks[5][1])**2)
-        vertical_2 = math.sqrt((eye_landmarks[2][0] - eye_landmarks[4][0])**2 + 
-                              (eye_landmarks[2][1] - eye_landmarks[4][1])**2)
+        # 垂直距離を2つ計算
+        vertical_1 = abs(eye_landmarks[1][1] - eye_landmarks[5][1])
+        vertical_2 = abs(eye_landmarks[2][1] - eye_landmarks[4][1])
         
-        # 水平距離
-        horizontal = math.sqrt((eye_landmarks[0][0] - eye_landmarks[3][0])**2 + 
-                              (eye_landmarks[0][1] - eye_landmarks[3][1])**2)
+        # 水平距離を計算
+        horizontal = abs(eye_landmarks[0][0] - eye_landmarks[3][0])
         
-        # EAR計算
-        if horizontal == 0:
-            return 0.0
+        # EAR計算（ゼロ除算対策）
+        if horizontal < 0.001:
+            return 0.3
         
         ear = (vertical_1 + vertical_2) / (2.0 * horizontal)
         return ear
@@ -108,9 +105,14 @@ class ActiveChecker:
         # 平均EAR
         avg_ear = (left_ear + right_ear) / 2.0
         
-        # まばたき検出ロジック
+        # デバッグ出力（フレーム毎に10回に1回）
+        if self.frame_count % 10 == 0:
+            print(f"Frame {self.frame_count}: EAR={avg_ear:.3f}, Threshold={self.blink_threshold}, Closed={self.is_eye_closed}")
+        
+        # まばたき検出ロジック（改善版）
         blink_detected = False
         
+        # EARの変化を追跡してまばたきを検出
         if avg_ear < self.blink_threshold:
             if not self.is_eye_closed:
                 self.is_eye_closed = True
@@ -120,40 +122,41 @@ class ActiveChecker:
                 self.blink_count += 1
                 self.is_eye_closed = False
                 blink_detected = True
+                print(f"Blink detected! Count: {self.blink_count}, EAR: {avg_ear:.3f}")  # デバッグ用
         
         return blink_detected
 
     def _detect_head_turn(self, landmarks) -> str:
         """
-        顔の向きを検出
+        頭部の傾きを検出（首をかしげる動作）
         
         Args:
             landmarks: 顔のランドマーク
             
         Returns:
-            顔の向き ('left', 'right', 'center')
+            頭部の傾き ('left', 'right', 'center')
         """
-        # 鼻先と左右の顔輪郭点を取得
-        nose_tip = landmarks.landmark[self.nose_tip_index]
-        left_face = landmarks.landmark[self.left_face_index]
-        right_face = landmarks.landmark[self.right_face_index]
+        # 左右の目尻と眉毛の端を取得して頭部の傾きを計算
+        left_eye_outer = landmarks.landmark[33]   # 左目外側
+        right_eye_outer = landmarks.landmark[362] # 右目外側
         
-        # 顔の中心からの鼻先の相対位置を計算
-        face_center_x = (left_face.x + right_face.x) / 2
-        nose_relative_x = nose_tip.x - face_center_x
+        # 両目を結ぶ線の傾きを計算
+        eye_line_slope = (right_eye_outer.y - left_eye_outer.y) / (right_eye_outer.x - left_eye_outer.x) if right_eye_outer.x != left_eye_outer.x else 0
         
-        # 顔の幅で正規化
-        face_width = abs(right_face.x - left_face.x)
-        if face_width == 0:
-            return 'center'
+        # 傾き角度を計算（ラジアンから度に変換）
+        tilt_angle = math.atan(eye_line_slope) * 180 / math.pi
         
-        normalized_position = nose_relative_x / face_width
+        # デバッグ出力（フレーム毎に10回に1回）
+        if self.frame_count % 10 == 0:
+            print(f"Head tilt - Frame {self.frame_count}: tilt_angle={tilt_angle:.1f}°, threshold={self.head_turn_threshold * 10:.1f}°")
         
-        # 顔の向き判定
-        if normalized_position < -self.head_turn_threshold:
-            return 'left'
-        elif normalized_position > self.head_turn_threshold:
-            return 'right'
+        # 頭部の傾き判定（閾値を度数で比較）
+        threshold_degrees = self.head_turn_threshold * 10  # 0.10 -> 1.0度
+        
+        if tilt_angle > threshold_degrees:
+            return 'left'   # 左にかしげる（時計回り）
+        elif tilt_angle < -threshold_degrees:
+            return 'right'  # 右にかしげる（反時計回り）
         else:
             return 'center'
 
@@ -198,12 +201,12 @@ class ActiveChecker:
                 
                 # チャレンジシーケンスの進行チェック
                 if self.blink_count >= 2 and not self.has_turned_left:
-                    # 2回まばたき完了後、左向きを待つ
+                    # 2回まばたき完了後、左にかしげるのを待つ
                     if head_direction == 'left':
                         self.has_turned_left = True
                         frame_result['challenge_status'] = 'left_completed'
                 elif self.blink_count >= 2 and self.has_turned_left and not self.has_turned_right:
-                    # 左向き完了後、右向きを待つ
+                    # 左にかしげる完了後、右にかしげるのを待つ
                     if head_direction == 'right':
                         self.has_turned_right = True
                         self.challenge_completed = True
@@ -216,7 +219,7 @@ class ActiveChecker:
 
     def check(self, frames: List[np.ndarray]) -> Dict[str, any]:
         """
-        チャレンジシーケンス（2回まばたき→左を向く→右を向く）判定
+        チャレンジシーケンス（2回まばたき→首を左にかしげる→首を右にかしげる）判定
         
         Args:
             frames: フレームのリスト
@@ -233,8 +236,8 @@ class ActiveChecker:
                 "message": "No frames to analyze",
                 "details": {
                     "blink_count": 0,
-                    "turned_left": False,
-                    "turned_right": False,
+                    "tilted_left": False,
+                    "tilted_right": False,
                     "challenge_completed": False
                 }
             }
@@ -258,8 +261,8 @@ class ActiveChecker:
         # 最終判定
         success_conditions = {
             "sufficient_blinks": self.blink_count >= 2,
-            "turned_left": self.has_turned_left,
-            "turned_right": self.has_turned_right,
+            "tilted_left": self.has_turned_left,
+            "tilted_right": self.has_turned_right,
             "challenge_completed": self.challenge_completed
         }
         
@@ -271,9 +274,9 @@ class ActiveChecker:
         elif self.blink_count < 2:
             message = f"Insufficient blinks detected: {self.blink_count}/2"
         elif not self.has_turned_left:
-            message = "User did not turn left after blinking"
+            message = "User did not tilt head left after blinking"
         elif not self.has_turned_right:
-            message = "User did not turn right after turning left"
+            message = "User did not tilt head right after tilting left"
         else:
             message = "Challenge sequence not completed correctly"
         
@@ -282,8 +285,8 @@ class ActiveChecker:
             "message": message,
             "details": {
                 "blink_count": self.blink_count,
-                "turned_left": self.has_turned_left,
-                "turned_right": self.has_turned_right,
+                "tilted_left": self.has_turned_left,
+                "tilted_right": self.has_turned_right,
                 "challenge_completed": self.challenge_completed,
                 "total_frames_processed": len(frame_results),
                 "face_detection_rate": sum(1 for r in frame_results if r['face_detected']) / len(frame_results) if frame_results else 0

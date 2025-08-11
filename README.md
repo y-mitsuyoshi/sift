@@ -5,7 +5,7 @@
 ## 特徴
 
 - **ダブルチェック機構**: アクティブ方式とパッシブ方式を組み合わせた堅牢な検知
-- **アクティブ検知**: MediaPipeを使用したチャレンジシーケンス（2回まばたき→左を向く→右を向く）の検証
+- **アクティブ検知**: MediaPipeを使用したチャレンジシーケンス（2回まばたき→左に首をかしげる→右に首をかしげる）の検証
 - **パッシブ検知**: Silent-Face-Anti-Spoofingモデルによるなりすまし検出
 - **Dockerコンテナ**: 高いポータビリティと再現性を確保
 
@@ -65,7 +65,7 @@ curl http://localhost:8000/health
             "message": "Challenge sequence completed correctly.",
             "details": {
                 "blink_count": 2,
-                "turned_left": true,
+                "tilted_left": true,
                 "challenge_completed": true
             }
         },
@@ -94,7 +94,7 @@ curl http://localhost:8000/health
             "message": "Insufficient blinks detected: 1/2",
             "details": {
                 "blink_count": 1,
-                "turned_left": false,
+                "tilted_left": false,
                 "challenge_completed": false
             }
         },
@@ -129,9 +129,9 @@ curl -X POST "http://localhost:8000/liveness/check" \
 
 ## テストケース
 
-1. **成功ケース**: 開発者自身がチャレンジシーケンス（2回まばたき→左を向く→右を向く）を正しく実行した動画
+1. **成功ケース**: 開発者自身がチャレンジシーケンス（2回まばたき→左に首をかしげる→右に首をかしげる）を正しく実行した動画
 2. **パッシブ失敗**: 顔写真をスマートフォンで表示して撮影した動画
-3. **アクティブ失敗**: チャレンジとは異なる動作（順序間違い、まばたき不足、左右の向きが不完全）をした動画
+3. **アクティブ失敗**: チャレンジとは異なる動作（順序間違い、まばたき不足、首の傾きが不完全）をした動画
 
 ## 開発環境
 

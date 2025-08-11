@@ -235,7 +235,7 @@ class FallbackActiveChecker:
             "message": "Fallback active check (MediaPipe not available)",
             "details": {
                 "blink_count": 2,
-                "turned_left": True,
+                "tilted_left": True,
                 "challenge_completed": True
             }
         }
