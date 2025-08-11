@@ -47,6 +47,7 @@ class ActiveChecker:
         self.blink_count = 0
         self.is_eye_closed = False
         self.has_turned_left = False
+        self.has_turned_right = False
         self.challenge_completed = False
         self.frame_count = 0
         self.head_positions = []
@@ -200,6 +201,11 @@ class ActiveChecker:
                     # 2回まばたき完了後、左向きを待つ
                     if head_direction == 'left':
                         self.has_turned_left = True
+                        frame_result['challenge_status'] = 'left_completed'
+                elif self.blink_count >= 2 and self.has_turned_left and not self.has_turned_right:
+                    # 左向き完了後、右向きを待つ
+                    if head_direction == 'right':
+                        self.has_turned_right = True
                         self.challenge_completed = True
                         frame_result['challenge_status'] = 'completed'
                 
@@ -210,7 +216,7 @@ class ActiveChecker:
 
     def check(self, frames: List[np.ndarray]) -> Dict[str, any]:
         """
-        チャレンジシーケンス（2回まばたき→左を向く）判定
+        チャレンジシーケンス（2回まばたき→左を向く→右を向く）判定
         
         Args:
             frames: フレームのリスト
@@ -228,6 +234,7 @@ class ActiveChecker:
                 "details": {
                     "blink_count": 0,
                     "turned_left": False,
+                    "turned_right": False,
                     "challenge_completed": False
                 }
             }
@@ -252,6 +259,7 @@ class ActiveChecker:
         success_conditions = {
             "sufficient_blinks": self.blink_count >= 2,
             "turned_left": self.has_turned_left,
+            "turned_right": self.has_turned_right,
             "challenge_completed": self.challenge_completed
         }
         
@@ -264,6 +272,8 @@ class ActiveChecker:
             message = f"Insufficient blinks detected: {self.blink_count}/2"
         elif not self.has_turned_left:
             message = "User did not turn left after blinking"
+        elif not self.has_turned_right:
+            message = "User did not turn right after turning left"
         else:
             message = "Challenge sequence not completed correctly"
         
@@ -273,6 +283,7 @@ class ActiveChecker:
             "details": {
                 "blink_count": self.blink_count,
                 "turned_left": self.has_turned_left,
+                "turned_right": self.has_turned_right,
                 "challenge_completed": self.challenge_completed,
                 "total_frames_processed": len(frame_results),
                 "face_detection_rate": sum(1 for r in frame_results if r['face_detected']) / len(frame_results) if frame_results else 0
