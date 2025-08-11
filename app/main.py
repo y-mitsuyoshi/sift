@@ -77,10 +77,12 @@ async def startup_event():
         
     except Exception as e:
         logger.error(f"Error during checker initialization: {e}", exc_info=True)
-        # フォールバック実装を使用
-        passive_checker = ImprovedFallbackPassiveChecker()
-        active_checker = FallbackActiveChecker()
-        logger.info("Using fallback implementations for both checkers")
+        # パッシブチェッカーのみフォールバック、アクティブチェッカーは常にMediaPipe版を使用
+        if passive_checker is None:
+            passive_checker = ImprovedFallbackPassiveChecker()
+        if active_checker is None:
+            active_checker = ActiveChecker()  # 常にMediaPipe版を使用
+        logger.info("Using MediaPipe active checker and fallback passive checker")
 
 class FallbackPassiveChecker:
     """
@@ -222,23 +224,6 @@ class ImprovedFallbackPassiveChecker:
             "average_real_score": round(float(average_score), 3),
             "face_detection_rate": round(face_detection_rate, 3),
             "message": f"Improved fallback check (face detection: {face_detection_rate:.1%})"
-        }
-
-class FallbackActiveChecker:
-    """
-    MediaPipeが利用できない場合のフォールバック実装
-    """
-    def check(self, frames):
-        logger.warning("Using fallback active checker - MediaPipe not available")
-        return {
-            "passed": True,
-            "message": "Fallback active check (MediaPipe not available)",
-            "details": {
-                "blink_count": 2,
-                "left_turn_detected": True,
-                "right_turn_detected": True,
-                "challenge_completed": True
-            }
         }
 
 def validate_video_file(file: UploadFile) -> None:

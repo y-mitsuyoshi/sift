@@ -6,7 +6,14 @@ import math
 
 class ActiveChecker:
     def __init__(self):
-        """
+        # デバッグ出力（フレーム毎に5回に1回）
+        if self.frame_count % 5 == 0:
+            print(f"Head tilt - Frame {self.frame_count}: tilt_angle={tilt_angle:.2f}°, threshold=±8.0°, dx={dx:.3f}, dy={dy:.3f}")
+            print(f"  Left eye outer (33): x={left_eye_outer.x:.3f}, y={left_eye_outer.y:.3f}")
+            print(f"  Right eye outer (263): x={right_eye_outer.x:.3f}, y={right_eye_outer.y:.3f}")
+        
+        # 頭部の傾き判定（適切な閾値で判定）
+        threshold_degrees = 8.0  # 8度の傾きで検出  """
         アクティブ検知器の初期化
         MediaPipeの顔検出とランドマーク検出を初期化
         """
@@ -55,7 +62,7 @@ class ActiveChecker:
         # 頭の傾き検出のための新しい状態
         self.left_tilt_frames = 0
         self.right_tilt_frames = 0
-        self.min_tilt_frames = 3  # 連続3フレーム以上で傾き確定
+        self.min_tilt_frames = 2  # 連続2フレーム以上で傾き確定（より敏感に）
 
     def _calculate_ear(self, eye_landmarks: List[Tuple[float, float]]) -> float:
         """
@@ -143,7 +150,7 @@ class ActiveChecker:
         """
         # 左右の目尻を取得して頭部の傾きを計算
         left_eye_outer = landmarks.landmark[33]   # 左目外側
-        right_eye_outer = landmarks.landmark[362] # 右目外側
+        right_eye_outer = landmarks.landmark[263] # 右目外側（正しいインデックス）
         
         # 両目を結ぶ線の傾きを計算
         dx = right_eye_outer.x - left_eye_outer.x
@@ -158,10 +165,10 @@ class ActiveChecker:
         
         # デバッグ出力（フレーム毎に5回に1回）
         if self.frame_count % 5 == 0:
-            print(f"Head tilt - Frame {self.frame_count}: tilt_angle={tilt_angle:.2f}°, threshold=±{self.head_turn_threshold * 57.3:.1f}°, dx={dx:.3f}, dy={dy:.3f}")
+            print(f"Head tilt - Frame {self.frame_count}: tilt_angle={tilt_angle:.2f}°, threshold=±{8.6:.1f}°, dx={dx:.3f}, dy={dy:.3f}")
         
-        # 頭部の傾き判定（閾値を度数で比較）
-        threshold_degrees = self.head_turn_threshold * 57.3  # ラジアンから度への変換係数
+        # 頭部の傾き判定（適切な閾値で判定）
+        threshold_degrees = 5.0  # 5度の傾きで検出（より敏感に）
         
         if tilt_angle > threshold_degrees:
             return 'left'   # 左にかしげる（時計回り）
@@ -213,17 +220,35 @@ class ActiveChecker:
                 head_direction = self._detect_head_turn(face_landmarks)
                 frame_result['head_direction'] = head_direction
                 
-                # 頭の傾きカウント更新
+                                # 頭の傾きカウント更新
                 if head_direction == 'left':
                     self.left_tilt_frames += 1
                     self.right_tilt_frames = 0  # リセット
+                    print(f"Left tilt detected - frames: {self.left_tilt_frames}")
                 elif head_direction == 'right':
                     self.right_tilt_frames += 1
                     self.left_tilt_frames = 0  # リセット
+                    print(f"Right tilt detected - frames: {self.right_tilt_frames}")
                 else:
-                    # centerの場合は両方を減衰させる
-                    self.left_tilt_frames = max(0, self.left_tilt_frames - 1)
-                    self.right_tilt_frames = max(0, self.right_tilt_frames - 1)
+                    # どちらでもない場合はカウンターを減らす
+                    if self.left_tilt_frames > 0:
+                        self.left_tilt_frames = max(0, self.left_tilt_frames - 1)
+                    if self.right_tilt_frames > 0:
+                        self.right_tilt_frames = max(0, self.right_tilt_frames - 1)
+                
+                # 左傾きの検出（まばたき2回完了後かつ左傾きがまだの場合）
+                if (self.blink_count >= 2 and not self.has_turned_left and 
+                    self.left_tilt_frames >= self.min_tilt_frames):
+                    self.has_turned_left = True
+                    frame_result['left_turn_detected'] = True
+                    print(f"LEFT HEAD TILT COMPLETED! (frames: {self.left_tilt_frames})")
+                
+                # 右傾きの検出（左傾き完了後）
+                if (self.has_turned_left and not self.has_turned_right and 
+                    self.right_tilt_frames >= self.min_tilt_frames):
+                    self.has_turned_right = True
+                    frame_result['right_turn_detected'] = True
+                    print(f"RIGHT HEAD TILT COMPLETED! (frames: {self.right_tilt_frames})")
                 
                 # 連続フレーム数に基づく傾き確定
                 left_confirmed = self.left_tilt_frames >= self.min_tilt_frames
