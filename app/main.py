@@ -7,7 +7,15 @@ import cv2
 from typing import Dict, Any
 
 from .video_processor import save_uploaded_file, extract_frames, cleanup_temp_file, get_video_info
-from .passive_checker import PassiveChecker
+
+# 条件付きインポート - オプションのモジュール
+try:
+    from .passive_checker import PassiveChecker
+    PASSIVE_CHECKER_AVAILABLE = True
+except ImportError as e:
+    PASSIVE_CHECKER_AVAILABLE = False
+    logging.warning(f"PassiveChecker not available: {e}")
+
 from .active_checker import ActiveChecker
 
 # ログ設定
@@ -40,39 +48,41 @@ async def startup_event():
     """
     global passive_checker, active_checker
     
-    # 複数のモデルパスを試行
-    possible_paths = [
-        "/app/app/models/2.7_80x80_MiniFASNetV2.pth",  # Dockerコンテナ内
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "models", "2.7_80x80_MiniFASNetV2.pth"),  # 相対パス
-        "app/models/2.7_80x80_MiniFASNetV2.pth"  # ワーキングディレクトリから
-    ]
-    
-    model_path = None
-    for path in possible_paths:
-        if os.path.exists(path):
-            model_path = path
-            logger.info(f"Found model file at: {path}")
-            break
-    
     try:
         # アクティブチェッカー初期化（MediaPipe）
         active_checker = ActiveChecker()
         logger.info("Active checker initialized successfully")
         
-        # パッシブチェッカー初期化（深層学習モデル）
-        if model_path:
-            try:
-                passive_checker = PassiveChecker(model_path, threshold=0.5)  # 閾値を下げる
-                logger.info(f"Passive checker initialized successfully with model: {model_path}")
-            except Exception as model_error:
-                logger.error(f"Failed to load model from {model_path}: {model_error}")
+        # パッシブチェッカー初期化
+        if PASSIVE_CHECKER_AVAILABLE:
+            # 複数のモデルパスを試行
+            possible_paths = [
+                "/app/app/models/2.7_80x80_MiniFASNetV2.pth",  # Dockerコンテナ内
+                os.path.join(os.path.dirname(os.path.abspath(__file__)), "models", "2.7_80x80_MiniFASNetV2.pth"),  # 相対パス
+                "app/models/2.7_80x80_MiniFASNetV2.pth"  # ワーキングディレクトリから
+            ]
+            
+            model_path = None
+            for path in possible_paths:
+                if os.path.exists(path):
+                    model_path = path
+                    logger.info(f"Found model file at: {path}")
+                    break
+            
+            if model_path:
+                try:
+                    passive_checker = PassiveChecker(model_path, threshold=0.5)
+                    logger.info(f"Passive checker initialized successfully with model: {model_path}")
+                except Exception as model_error:
+                    logger.error(f"Failed to load model from {model_path}: {model_error}")
+                    logger.info("Using improved fallback passive checker")
+                    passive_checker = ImprovedFallbackPassiveChecker()
+            else:
+                logger.warning("Model file not found in any of the expected locations")
                 logger.info("Using improved fallback passive checker")
                 passive_checker = ImprovedFallbackPassiveChecker()
         else:
-            logger.warning("Model file not found in any of the expected locations:")
-            for path in possible_paths:
-                logger.warning(f"  - {path}")
-            logger.info("Using improved fallback passive checker")
+            logger.info("PassiveChecker module not available. Using fallback passive checker")
             passive_checker = ImprovedFallbackPassiveChecker()
         
     except Exception as e:
@@ -150,12 +160,16 @@ class ImprovedFallbackPassiveChecker:
         
         # 新しい検知器をインポート・初期化
         try:
-            from .passive_checker import TextureNoiseDetector, FaceIdentityDetector, VirtualCameraDetector
-            self.texture_detector = TextureNoiseDetector()
-            self.identity_detector = FaceIdentityDetector()
-            self.virtual_camera_detector = VirtualCameraDetector()
-            self.enhanced_available = True
-            logger.info("Enhanced detectors initialized successfully")
+            if PASSIVE_CHECKER_AVAILABLE:
+                from .passive_checker import TextureNoiseDetector, FaceIdentityDetector, VirtualCameraDetector
+                self.texture_detector = TextureNoiseDetector()
+                self.identity_detector = FaceIdentityDetector()
+                self.virtual_camera_detector = VirtualCameraDetector()
+                self.enhanced_available = True
+                logger.info("Enhanced detectors initialized successfully")
+            else:
+                self.enhanced_available = False
+                logger.info("Enhanced detectors not available (passive_checker module not loaded)")
         except ImportError as e:
             logger.warning(f"Enhanced detectors not available: {e}")
             self.enhanced_available = False
