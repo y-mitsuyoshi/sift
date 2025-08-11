@@ -6,8 +6,39 @@
 
 - **ダブルチェック機構**: アクティブ方式とパッシブ方式を組み合わせた堅牢な検知
 - **アクティブ検知**: MediaPipeを使用したチャレンジシーケンス（2回まばたき→左に首をかしげる→右に首をかしげる）の検証
-- **パッシブ検知**: Silent-Face-Anti-Spoofingモデルによるなりすまし検出
+- **強化されたパッシブ検知**: 
+  - **検知器1**: Silent-Face-Anti-Spoofingモデル（MiniFASNetV2）によるディープフェイク検出
+  - **検知器2**: テクスチャ・ノイズ分析による加工痕跡の検出
+  - **検知器3**: 時間軸上の顔同一性分析（DeepFace）によるフレーム間一貫性検証
+  - **検知器4**: 入力ソース信頼性分析による仮想カメラ検出
 - **Dockerコンテナ**: 高いポータビリティと再現性を確保
+
+## 強化されたパッシブ検知の詳細
+
+### 検知器1: テクスチャ・ノイズ分析
+- **LBP (Local Binary Pattern)**: 質感の多様性を分析
+- **ハイフリケンシーノイズ**: デジタル加工特有のノイズパターンを検出
+- **圧縮アーティファクト**: JPEG圧縮による劣化を分析
+- **エッジ一貫性**: エッジの自然さを評価
+- **周波数ドメイン分析**: FFTによる周波数異常を検出
+
+### 検知器2: 時間軸上の顔同一性分析
+- **DeepFaceライブラリ**: VGG-Faceモデルによる顔特徴抽出
+- **フレーム間類似度**: コサイン類似度による一貫性チェック
+- **リアルタイム合成検出**: フレーム間の微妙な「顔のブレ」を検知
+- **別人混入検出**: 動画内での人物の入れ替わりを検出
+
+### 検知器3: 入力ソース信頼性分析
+- **仮想カメラ検出**: v4l2loopback等の仮想デバイスを検出
+- **疑わしいプロセス監視**: OBS、ManyCam等の配信・加工ソフトを検出
+- **システムレベル分析**: プロセスリストとデバイス情報の総合判定
+
+### 総合判定ロジック
+各検知器の結果を重み付けして最終判定：
+- MiniFASNetV2: 40%
+- テクスチャ分析: 25%
+- 顔同一性分析: 25%
+- 仮想カメラ検出: 10%
 
 ## セットアップ
 
@@ -72,7 +103,32 @@ curl http://localhost:8000/health
         "passive_check": {
             "passed": true,
             "average_real_score": 0.95,
-            "message": "Passive check passed"
+            "base_model_score": 0.92,
+            "message": "Enhanced passive check passed",
+            "enhanced_analysis": {
+                "texture_analysis": {
+                    "passed": true,
+                    "average_score": 0.85,
+                    "message": "Texture analysis passed (score: 0.850)"
+                },
+                "identity_analysis": {
+                    "passed": true,
+                    "consistency_score": 0.95,
+                    "message": "Identity consistency passed (avg: 0.950)"
+                },
+                "virtual_camera_analysis": {
+                    "passed": true,
+                    "risk_score": 0.0,
+                    "message": "Virtual camera detection passed (risk: 0.000)"
+                },
+                "weighted_scores": {
+                    "base_model": 0.92,
+                    "texture": 0.85,
+                    "identity": 0.95,
+                    "virtual_camera": 1.0
+                },
+                "critical_failures": []
+            }
         }
     },
     "video_info": {
@@ -130,8 +186,11 @@ curl -X POST "http://localhost:8000/liveness/check" \
 ## テストケース
 
 1. **成功ケース**: 開発者自身がチャレンジシーケンス（2回まばたき→左に首をかしげる→右に首をかしげる）を正しく実行した動画
-2. **パッシブ失敗**: 顔写真をスマートフォンで表示して撮影した動画
-3. **アクティブ失敗**: チャレンジとは異なる動作（順序間違い、まばたき不足、首の傾きが不完全）をした動画
+2. **パッシブ失敗（写真攻撃）**: 顔写真をスマートフォンで表示して撮影した動画
+3. **パッシブ失敗（ディープフェイク）**: First Order Motion ModelやDeepFaceLiveで生成した動画
+4. **パッシブ失敗（仮想カメラ）**: OBSやv4l2loopbackを使用した動画入力
+5. **パッシブ失敗（顔入れ替え）**: 動画内で異なる人物の顔が混入した場合
+6. **アクティブ失敗**: チャレンジとは異なる動作（順序間違い、まばたき不足、首の傾きが不完全）をした動画
 
 ## 開発環境
 
@@ -141,6 +200,9 @@ curl -X POST "http://localhost:8000/liveness/check" \
   - MediaPipe (顔検出・ランドマーク)
   - PyTorch (Deep Learning)
   - OpenCV (動画処理)
+  - DeepFace (顔認識・同一性分析)
+  - scikit-image (テクスチャ分析)
+  - psutil (システム情報取得)
 - **コンテナ**: Docker, Docker Compose
 
 ## ファイル構成

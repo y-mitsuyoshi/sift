@@ -9,3 +9,7 @@ numpy
 mediapipe
 requests
 Pillow
+deepface
+tensorflow
+scikit-image
+psutil
