@@ -40,9 +40,10 @@ async def startup_event():
     """
     global passive_checker, active_checker
     
-    # モデルパス（Dockerコンテナ内での絶対パス）
-    model_path = "/app/app/models/2.7_80x80_MiniFASNetV2.pth"
-    
+    # モデルパスをこのファイルの相対パスから構築
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+    model_path = os.path.join(BASE_DIR, "models", "2.7_80x80_MiniFASNetV2.pth")
+
     try:
         # アクティブチェッカー初期化（MediaPipe）
         active_checker = ActiveChecker()

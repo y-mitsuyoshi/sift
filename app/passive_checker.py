@@ -163,8 +163,8 @@ class PassiveChecker:
             # ソフトマックスで確率に変換
             probs = torch.softmax(outputs, dim=1)
             
-            # 「本物」クラスの確率を取得 (クラス0が本物と仮定)
-            real_score = probs[0, 0].item()
+            # 「本物」クラスの確率を取得 (クラス1が本物と仮定)
+            real_score = probs[0, 1].item()
             
             return real_score
 
