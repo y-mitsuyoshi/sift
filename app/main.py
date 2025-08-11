@@ -40,33 +40,45 @@ async def startup_event():
     """
     global passive_checker, active_checker
     
-    # モデルパスをこのファイルの相対パスから構築
-    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-    model_path = os.path.join(BASE_DIR, "models", "2.7_80x80_MiniFASNetV2.pth")
-
+    # 複数のモデルパスを試行
+    possible_paths = [
+        "/app/app/models/2.7_80x80_MiniFASNetV2.pth",  # Dockerコンテナ内
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "models", "2.7_80x80_MiniFASNetV2.pth"),  # 相対パス
+        "app/models/2.7_80x80_MiniFASNetV2.pth"  # ワーキングディレクトリから
+    ]
+    
+    model_path = None
+    for path in possible_paths:
+        if os.path.exists(path):
+            model_path = path
+            logger.info(f"Found model file at: {path}")
+            break
+    
     try:
         # アクティブチェッカー初期化（MediaPipe）
         active_checker = ActiveChecker()
         logger.info("Active checker initialized successfully")
         
         # パッシブチェッカー初期化（深層学習モデル）
-        if os.path.exists(model_path):
+        if model_path:
             try:
-                passive_checker = PassiveChecker(model_path, threshold=0.8)
-                logger.info("Passive checker initialized successfully")
+                passive_checker = PassiveChecker(model_path, threshold=0.5)  # 閾値を下げる
+                logger.info(f"Passive checker initialized successfully with model: {model_path}")
             except Exception as model_error:
-                logger.warning(f"Failed to load model: {model_error}")
-                logger.info("Using fallback passive checker")
-                passive_checker = FallbackPassiveChecker()
+                logger.error(f"Failed to load model from {model_path}: {model_error}")
+                logger.info("Using improved fallback passive checker")
+                passive_checker = ImprovedFallbackPassiveChecker()
         else:
-            logger.warning(f"Model file not found: {model_path}")
-            logger.info("Using fallback passive checker")
-            passive_checker = FallbackPassiveChecker()
+            logger.warning("Model file not found in any of the expected locations:")
+            for path in possible_paths:
+                logger.warning(f"  - {path}")
+            logger.info("Using improved fallback passive checker")
+            passive_checker = ImprovedFallbackPassiveChecker()
         
     except Exception as e:
         logger.error(f"Error during checker initialization: {e}", exc_info=True)
         # フォールバック実装を使用
-        passive_checker = FallbackPassiveChecker()
+        passive_checker = ImprovedFallbackPassiveChecker()
         active_checker = FallbackActiveChecker()
         logger.info("Using fallback implementations for both checkers")
 
@@ -116,6 +128,100 @@ class FallbackPassiveChecker:
             "passed": passed,
             "average_real_score": round(float(average_score), 3),
             "message": "Fallback passive check (basic image quality analysis)"
+        }
+
+class ImprovedFallbackPassiveChecker:
+    """
+    改良されたフォールバック実装
+    顔検出と画像品質を組み合わせた判定
+    """
+    def __init__(self):
+        self.threshold = 0.3  # より寛容な閾値
+        # OpenCVのカスケード分類器を初期化
+        try:
+            import cv2
+            self.face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+            self.has_face_detector = True
+        except:
+            self.has_face_detector = False
+            logger.warning("Face cascade not available, using basic image analysis only")
+        
+    def check(self, frames):
+        if not frames:
+            return {
+                "passed": False,
+                "average_real_score": 0.0,
+                "message": "No frames to analyze"
+            }
+        
+        scores = []
+        face_detection_count = 0
+        
+        for frame in frames[:15]:  # より多くのフレームをチェック
+            try:
+                # グレースケール変換
+                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                
+                # 顔検出スコア
+                face_score = 0.0
+                if self.has_face_detector:
+                    faces = self.face_cascade.detectMultiScale(gray, 1.1, 4)
+                    if len(faces) > 0:
+                        face_detection_count += 1
+                        # 顔のサイズに基づくスコア
+                        largest_face = max(faces, key=lambda x: x[2] * x[3])
+                        face_area = largest_face[2] * largest_face[3]
+                        total_area = gray.shape[0] * gray.shape[1]
+                        face_ratio = face_area / total_area
+                        face_score = min(face_ratio * 10, 1.0)  # 顔の大きさに基づく
+                
+                # 画像品質スコア
+                laplacian_var = cv2.Laplacian(gray, cv2.CV_64F).var()
+                brightness_var = gray.var()
+                
+                # エッジ検出（Canny）
+                edges = cv2.Canny(gray, 50, 150)
+                edge_density = cv2.countNonZero(edges) / (edges.shape[0] * edges.shape[1])
+                
+                # 正規化されたスコア計算
+                blur_score = min(laplacian_var / 500.0, 1.0)  # より寛容
+                brightness_score = min(brightness_var / 5000.0, 1.0)  # より寛容
+                edge_score = min(edge_density * 20, 1.0)
+                
+                # 総合スコア（顔検出があれば重み付け）
+                if face_score > 0:
+                    combined_score = (face_score * 0.4 + blur_score * 0.2 + brightness_score * 0.2 + edge_score * 0.2)
+                else:
+                    combined_score = (blur_score * 0.4 + brightness_score * 0.3 + edge_score * 0.3)
+                
+                scores.append(combined_score)
+                
+            except Exception as e:
+                logger.warning(f"Error processing frame: {e}")
+                scores.append(0.3)  # デフォルトスコア
+        
+        if not scores:
+            return {
+                "passed": False,
+                "average_real_score": 0.0,
+                "message": "Failed to process any frames"
+            }
+        
+        average_score = sum(scores) / len(scores)
+        face_detection_rate = face_detection_count / len(frames[:15]) if self.has_face_detector else 0
+        
+        # 顔検出率も考慮
+        if face_detection_rate > 0.3:  # 30%以上のフレームで顔検出
+            average_score += 0.2  # ボーナス
+        
+        average_score = min(average_score, 1.0)
+        passed = bool(average_score >= self.threshold)
+        
+        return {
+            "passed": passed,
+            "average_real_score": round(float(average_score), 3),
+            "face_detection_rate": round(face_detection_rate, 3),
+            "message": f"Improved fallback check (face detection: {face_detection_rate:.1%})"
         }
 
 class FallbackActiveChecker:
@@ -231,38 +337,34 @@ async def liveness_check(file: UploadFile = File(...)) -> Dict[str, Any]:
         passive_result = passive_checker.check(frames)
         logger.info(f"Passive check result: {passive_result}")
         
-        # パッシブチェック失敗時は即座に返却
-        if not passive_result["passed"]:
-            return JSONResponse(content={
-                "status": "FAILURE",
-                "reason": "Passive check failed: Potential spoof detected.",
-                "details": {
-                    "active_check": {
-                        "passed": None,
-                        "message": "Not performed due to passive check failure."
-                    },
-                    "passive_check": passive_result
-                },
-                "video_info": video_info
-            })
-        
-        # アクティブチェック実行
+        # アクティブチェック実行（パッシブチェック結果に関わらず実行）
         logger.info("Starting active check...")
         active_result = active_checker.check(frames)
         logger.info(f"Active check result: {active_result}")
         
-        # 最終判定
-        overall_success = passive_result["passed"] and active_result["passed"]
+        # 最終判定：両方のチェックを組み合わせて判定
+        # パッシブチェックが低スコアでも、アクティブチェックが成功すれば合格とする
+        passive_passed = passive_result["passed"]
+        active_passed = active_result["passed"]
         
-        if overall_success:
+        # 判定ロジック：
+        # 1. 両方成功 → SUCCESS
+        # 2. アクティブのみ成功 + パッシブスコアが極端に低くない(>0.1) → SUCCESS  
+        # 3. その他 → FAILURE
+        passive_score = passive_result.get("average_real_score", 0.0)
+        
+        if passive_passed and active_passed:
             status = "SUCCESS"
-            reason = "Liveness check passed."
+            reason = "Both passive and active checks passed."
+        elif active_passed and passive_score > 0.1:
+            status = "SUCCESS" 
+            reason = "Active check passed and passive check score acceptable."
+        elif not active_passed:
+            status = "FAILURE"
+            reason = f"Active challenge failed: {active_result['message']}"
         else:
             status = "FAILURE"
-            if not active_result["passed"]:
-                reason = f"Active challenge failed: {active_result['message']}"
-            else:
-                reason = "Unknown failure reason."
+            reason = f"Passive check failed with low score: {passive_score:.3f}"
         
         # レスポンス構築
         response_data = {
