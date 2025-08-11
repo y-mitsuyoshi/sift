@@ -304,15 +304,15 @@ async def liveness_check(file: UploadFile = File(...)) -> Dict[str, Any]:
         video_info = get_video_info(temp_file_path)
         logger.info(f"Video info: {video_info}")
         
-        # 10秒制限チェック
-        if video_info["duration"] > 10.0:
+        # 30秒制限チェック
+        if video_info["duration"] > 30.0:
             raise HTTPException(
                 status_code=400,
-                detail=f"Video duration ({video_info['duration']:.2f}s) exceeds 10 second limit"
+                detail=f"Video duration ({video_info['duration']:.2f}s) exceeds 30 second limit"
             )
         
         # フレーム抽出
-        frames = extract_frames(temp_file_path, max_frames=150)  # 最大150フレーム
+        frames = extract_frames(temp_file_path, max_frames=450)  # 最大450フレーム（30秒×15fps相当）
         if not frames:
             raise HTTPException(status_code=400, detail="No frames could be extracted from video")
         
