@@ -156,9 +156,9 @@ class TextureNoiseDetector:
         passed = avg_score >= self.threshold
         
         return {
-            'passed': passed,
+            'passed': bool(passed),
             'average_score': round(float(avg_score), 3),
-            'individual_scores': [round(s, 3) for s in scores],
+            'individual_scores': [round(float(s), 3) for s in scores],
             'detailed_metrics': detailed_metrics,
             'message': f"Texture analysis {'passed' if passed else 'failed'} (score: {avg_score:.3f})"
         }
@@ -238,10 +238,10 @@ class FaceIdentityDetector:
             passed = avg_similarity >= self.threshold and min_similarity >= (self.threshold - 0.1)
             
             return {
-                'passed': passed,
+                'passed': bool(passed),
                 'consistency_score': round(float(avg_similarity), 3),
                 'min_similarity': round(float(min_similarity), 3),
-                'frame_similarities': [round(s, 3) for s in similarities],
+                'frame_similarities': [round(float(s), 3) for s in similarities],
                 'valid_frame_count': len(embeddings),
                 'message': f"Identity consistency {'passed' if passed else 'failed'} (avg: {avg_similarity:.3f})"
             }
@@ -322,7 +322,7 @@ class VirtualCameraDetector:
             passed = risk_score < 0.5
             
             return {
-                'passed': passed,
+                'passed': bool(passed),
                 'risk_score': round(float(risk_score), 3),
                 'suspicious_processes': suspicious_found,
                 'virtual_devices': virtual_devices,
@@ -543,16 +543,16 @@ class PassiveChecker:
             final_message = f"Enhanced passive check failed (weighted score: {weighted_score:.3f})"
         
         return {
-            "passed": final_passed,
-            "average_real_score": round(weighted_score, 3),
-            "base_model_score": round(base_score, 3),
-            "frame_scores": [round(s, 3) for s in scores],
-            "message": final_message,
+            "passed": bool(final_passed),
+            "average_real_score": round(float(weighted_score), 3),
+            "base_model_score": round(float(base_score), 3),
+            "frame_scores": [round(float(s), 3) for s in scores],
+            "message": str(final_message),
             "enhanced_analysis": {
                 "texture_analysis": texture_result,
                 "identity_analysis": identity_result,
                 "virtual_camera_analysis": virtual_camera_result,
-                "weighted_scores": {k: round(v, 3) for k, v in normalized_scores.items()},
+                "weighted_scores": {k: round(float(v), 3) for k, v in normalized_scores.items()},
                 "weights_used": weights,
                 "critical_failures": critical_failures
             }

@@ -11,5 +11,6 @@ requests
 Pillow
 deepface
 tensorflow
+tf-keras
 scikit-image
 psutil
