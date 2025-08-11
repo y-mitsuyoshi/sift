@@ -38,7 +38,7 @@ class ActiveChecker:
         
         # しきい値設定
         self.blink_threshold = 0.18  # まばたき判定のEAR閾値（より寛容に）
-        self.head_turn_threshold = 0.10  # 頭部の傾き判定の閾値（度数換算で1.0度）
+        self.head_turn_threshold = 0.03  # 頭部の傾き判定の閾値（度数換算で約0.3度、より敏感に）
 
     def reset_state(self):
         """
@@ -51,6 +51,11 @@ class ActiveChecker:
         self.challenge_completed = False
         self.frame_count = 0
         self.head_positions = []
+        
+        # 頭の傾き検出のための新しい状態
+        self.left_tilt_frames = 0
+        self.right_tilt_frames = 0
+        self.min_tilt_frames = 3  # 連続3フレーム以上で傾き確定
 
     def _calculate_ear(self, eye_landmarks: List[Tuple[float, float]]) -> float:
         """
@@ -136,22 +141,27 @@ class ActiveChecker:
         Returns:
             頭部の傾き ('left', 'right', 'center')
         """
-        # 左右の目尻と眉毛の端を取得して頭部の傾きを計算
+        # 左右の目尻を取得して頭部の傾きを計算
         left_eye_outer = landmarks.landmark[33]   # 左目外側
         right_eye_outer = landmarks.landmark[362] # 右目外側
         
         # 両目を結ぶ線の傾きを計算
-        eye_line_slope = (right_eye_outer.y - left_eye_outer.y) / (right_eye_outer.x - left_eye_outer.x) if right_eye_outer.x != left_eye_outer.x else 0
+        dx = right_eye_outer.x - left_eye_outer.x
+        dy = right_eye_outer.y - left_eye_outer.y
         
-        # 傾き角度を計算（ラジアンから度に変換）
-        tilt_angle = math.atan(eye_line_slope) * 180 / math.pi
+        if abs(dx) < 0.001:  # ゼロ除算対策
+            tilt_angle = 0
+        else:
+            eye_line_slope = dy / dx
+            # 傾き角度を計算（ラジアンから度に変換）
+            tilt_angle = math.atan(eye_line_slope) * 180 / math.pi
         
-        # デバッグ出力（フレーム毎に10回に1回）
-        if self.frame_count % 10 == 0:
-            print(f"Head tilt - Frame {self.frame_count}: tilt_angle={tilt_angle:.1f}°, threshold={self.head_turn_threshold * 10:.1f}°")
+        # デバッグ出力（フレーム毎に5回に1回）
+        if self.frame_count % 5 == 0:
+            print(f"Head tilt - Frame {self.frame_count}: tilt_angle={tilt_angle:.2f}°, threshold=±{self.head_turn_threshold * 57.3:.1f}°, dx={dx:.3f}, dy={dy:.3f}")
         
         # 頭部の傾き判定（閾値を度数で比較）
-        threshold_degrees = self.head_turn_threshold * 10  # 0.10 -> 1.0度
+        threshold_degrees = self.head_turn_threshold * 57.3  # ラジアンから度への変換係数
         
         if tilt_angle > threshold_degrees:
             return 'left'   # 左にかしげる（時計回り）
@@ -199,18 +209,40 @@ class ActiveChecker:
                 head_direction = self._detect_head_turn(face_landmarks)
                 frame_result['head_direction'] = head_direction
                 
+                # 頭の傾きカウント更新
+                if head_direction == 'left':
+                    self.left_tilt_frames += 1
+                    self.right_tilt_frames = 0  # リセット
+                elif head_direction == 'right':
+                    self.right_tilt_frames += 1
+                    self.left_tilt_frames = 0  # リセット
+                else:
+                    # centerの場合は両方を減衰させる
+                    self.left_tilt_frames = max(0, self.left_tilt_frames - 1)
+                    self.right_tilt_frames = max(0, self.right_tilt_frames - 1)
+                
+                # 連続フレーム数に基づく傾き確定
+                left_confirmed = self.left_tilt_frames >= self.min_tilt_frames
+                right_confirmed = self.right_tilt_frames >= self.min_tilt_frames
+                
                 # チャレンジシーケンスの進行チェック
                 if self.blink_count >= 2 and not self.has_turned_left:
                     # 2回まばたき完了後、左にかしげるのを待つ
-                    if head_direction == 'left':
+                    if left_confirmed:
                         self.has_turned_left = True
                         frame_result['challenge_status'] = 'left_completed'
+                        print(f"Left tilt confirmed at frame {self.frame_count} (consecutive frames: {self.left_tilt_frames})")
                 elif self.blink_count >= 2 and self.has_turned_left and not self.has_turned_right:
                     # 左にかしげる完了後、右にかしげるのを待つ
-                    if head_direction == 'right':
+                    if right_confirmed:
                         self.has_turned_right = True
                         self.challenge_completed = True
                         frame_result['challenge_status'] = 'completed'
+                        print(f"Right tilt confirmed at frame {self.frame_count} (consecutive frames: {self.right_tilt_frames})")
+                
+                # デバッグ情報を出力
+                if self.frame_count % 10 == 0:
+                    print(f"Frame {self.frame_count}: blinks={self.blink_count}, left_frames={self.left_tilt_frames}, right_frames={self.right_tilt_frames}, status={'left_done' if self.has_turned_left else 'waiting_left' if self.blink_count >= 2 else 'waiting_blinks'}")
                 
                 break  # 最初の顔のみ処理
         
