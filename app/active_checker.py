@@ -31,14 +31,14 @@ class ActiveChecker:
         self.right_eye_indices = [33, 160, 158, 133, 153, 144]
         
         # 顔の向き検出用のランドマークインデックス
-        # 目の外側のポイント（頭部の傾き検出用）
+        # 両目の外側のポイント（頭部の傾き検出用）
         self.nose_tip_index = 1
         self.left_face_index = 234
         self.right_face_index = 454
         
         # しきい値設定
         self.blink_threshold = 0.18  # まばたき判定のEAR閾値（より寛容に）
-        self.head_turn_threshold = 0.03  # 頭部の傾き判定の閾値（度数換算で約0.3度、より敏感に）
+        self.head_turn_threshold = 0.15  # 頭部の傾き判定の閾値（度数換算で約8.6度、より検出しやすく）
 
     def reset_state(self):
         """
@@ -194,6 +194,10 @@ class ActiveChecker:
             'blink_detected': False,
             'head_direction': 'none',
             'blink_count': self.blink_count,
+            'left_turn_detected': False,
+            'right_turn_detected': False,
+            'left_turn_status': self.has_turned_left,
+            'right_turn_status': self.has_turned_right,
             'challenge_status': 'in_progress'
         }
         
@@ -230,19 +234,25 @@ class ActiveChecker:
                     # 2回まばたき完了後、左にかしげるのを待つ
                     if left_confirmed:
                         self.has_turned_left = True
+                        frame_result['left_turn_detected'] = True
                         frame_result['challenge_status'] = 'left_completed'
                         print(f"Left tilt confirmed at frame {self.frame_count} (consecutive frames: {self.left_tilt_frames})")
                 elif self.blink_count >= 2 and self.has_turned_left and not self.has_turned_right:
                     # 左にかしげる完了後、右にかしげるのを待つ
                     if right_confirmed:
                         self.has_turned_right = True
+                        frame_result['right_turn_detected'] = True
                         self.challenge_completed = True
                         frame_result['challenge_status'] = 'completed'
                         print(f"Right tilt confirmed at frame {self.frame_count} (consecutive frames: {self.right_tilt_frames})")
                 
+                # フレーム結果のステータス更新
+                frame_result['left_turn_status'] = self.has_turned_left
+                frame_result['right_turn_status'] = self.has_turned_right
+                
                 # デバッグ情報を出力
                 if self.frame_count % 10 == 0:
-                    print(f"Frame {self.frame_count}: blinks={self.blink_count}, left_frames={self.left_tilt_frames}, right_frames={self.right_tilt_frames}, status={'left_done' if self.has_turned_left else 'waiting_left' if self.blink_count >= 2 else 'waiting_blinks'}")
+                    print(f"Frame {self.frame_count}: blinks={self.blink_count}, left_frames={self.left_tilt_frames}, right_frames={self.right_tilt_frames}, status={'right_done' if self.has_turned_right else 'waiting_right' if self.has_turned_left else 'waiting_left' if self.blink_count >= 2 else 'waiting_blinks'}")
                 
                 break  # 最初の顔のみ処理
         
@@ -251,7 +261,7 @@ class ActiveChecker:
 
     def check(self, frames: List[np.ndarray]) -> Dict[str, any]:
         """
-        チャレンジシーケンス（2回まばたき→首を左にかしげる→首を右にかしげる）判定
+        チャレンジシーケンス（2回まばたき→左に首をかしげる→右に首をかしげる）判定
         
         Args:
             frames: フレームのリスト
@@ -268,8 +278,8 @@ class ActiveChecker:
                 "message": "No frames to analyze",
                 "details": {
                     "blink_count": 0,
-                    "tilted_left": False,
-                    "tilted_right": False,
+                    "left_turn_detected": False,
+                    "right_turn_detected": False,
                     "challenge_completed": False
                 }
             }
@@ -317,8 +327,8 @@ class ActiveChecker:
             "message": message,
             "details": {
                 "blink_count": self.blink_count,
-                "tilted_left": self.has_turned_left,
-                "tilted_right": self.has_turned_right,
+                "left_turn_detected": self.has_turned_left,  # APIレスポンス形式に合わせて修正
+                "right_turn_detected": self.has_turned_right,  # APIレスポンス形式に合わせて修正
                 "challenge_completed": self.challenge_completed,
                 "total_frames_processed": len(frame_results),
                 "face_detection_rate": sum(1 for r in frame_results if r['face_detected']) / len(frame_results) if frame_results else 0
