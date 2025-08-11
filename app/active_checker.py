@@ -226,19 +226,19 @@ class ActiveChecker:
                 right_confirmed = self.right_tilt_frames >= self.min_tilt_frames
                 
                 # チャレンジシーケンスの進行チェック
-                if self.blink_count >= 2 and not self.has_turned_left:
-                    # 2回まばたき完了後、左にかしげるのを待つ
-                    if left_confirmed:
-                        self.has_turned_left = True
-                        frame_result['challenge_status'] = 'left_completed'
-                        print(f"Left tilt confirmed at frame {self.frame_count} (consecutive frames: {self.left_tilt_frames})")
-                elif self.blink_count >= 2 and self.has_turned_left and not self.has_turned_right:
-                    # 左にかしげる完了後、右にかしげるのを待つ
+                if self.blink_count >= 2 and not self.has_turned_right:
+                    # 2回まばたき完了後、右にかしげるのを待つ
                     if right_confirmed:
                         self.has_turned_right = True
+                        frame_result['challenge_status'] = 'right_completed'
+                        print(f"Right tilt confirmed at frame {self.frame_count} (consecutive frames: {self.right_tilt_frames})")
+                elif self.blink_count >= 2 and self.has_turned_right and not self.has_turned_left:
+                    # 右にかしげる完了後、左にかしげるのを待つ
+                    if left_confirmed:
+                        self.has_turned_left = True
                         self.challenge_completed = True
                         frame_result['challenge_status'] = 'completed'
-                        print(f"Right tilt confirmed at frame {self.frame_count} (consecutive frames: {self.right_tilt_frames})")
+                        print(f"Left tilt confirmed at frame {self.frame_count} (consecutive frames: {self.left_tilt_frames})")
                 
                 # デバッグ情報を出力
                 if self.frame_count % 10 == 0:
@@ -305,10 +305,10 @@ class ActiveChecker:
             message = "Challenge sequence completed correctly."
         elif self.blink_count < 2:
             message = f"Insufficient blinks detected: {self.blink_count}/2"
-        elif not self.has_turned_left:
-            message = "User did not tilt head left after blinking"
         elif not self.has_turned_right:
-            message = "User did not tilt head right after tilting left"
+            message = "User did not tilt head right after blinking"
+        elif not self.has_turned_left:
+            message = "User did not tilt head left after tilting right"
         else:
             message = "Challenge sequence not completed correctly"
         
